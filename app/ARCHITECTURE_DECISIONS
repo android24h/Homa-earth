@@ -1,0 +1,21 @@
+# Architecture Decisions — Homa Earth
+
+## Why birthDate instead of age?
+Instead of storing age as a fixed number, we store birthDate as a LocalDate. Age is a derived value — it's computed from a point in time — so storing it directly means the value becomes stale the moment a year passes, unless we build extra logic to keep updating it manually. By storing birthDate instead, age can always be calculated on demand from a value that never changes, guaranteeing correctness without any extra maintenance. Since Room doesn't recognize LocalDate as a native data type, we also created a TypeConverter to handle the conversion.
+
+## Why Gender and SmokingStatus as enum classes?
+We used enum classes for Gender and SmokingStatus because both fields can have more than one possible value, and that set of values needs to stay fixed and controlled — not free text. By restricting them to an enum, only the values we explicitly defined can ever be assigned, which prevents typos and invalid data from ever entering the database. This also makes the code safer to work with later: if we handle these fields in a when expression, the compiler forces us to account for every possible case.
+
+## Why ForeignKey with CASCADE between UserProfile and DailyEntry?
+A ForeignKey defines a formal relationship between two tables. In our case, we specified which entity the relationship points to (UserProfileEntity), which column in that parent table it must match (id), and which column in the child table (DailyEntryEntity) holds that reference (user_id). This guarantees that every DailyEntry record is always linked to a real, existing profile — the database itself rejects any record pointing to a profile that doesn't exist.
+
+We also set onDelete = ForeignKey.CASCADE, which means that if a UserProfile is deleted, all of its related DailyEntry records are automatically deleted along with it. Without this, deleting a profile would leave orphaned daily-entry records behind with no owner.
+
+## Why Index on user_id and date?
+We added indices on user_id and date because these are the two columns our queries filter on most often — fetching all records for a specific user, or a specific date range for weekly and monthly reports. Without an index, the database would have to scan every row in the table to find matches, which gets slower as the table grows. An index lets the database look up matching rows directly, the same way a book's index lets you jump straight to a topic instead of reading every page.
+
+## Why LocalDate for date/birthDate, and Long for createdAt?
+We use LocalDate when only the calendar day matters, with no need for the exact time — that's the case for birthDate and date. We use Long (epoch milliseconds) when the exact moment in time matters, down to the hour and second — that's the case for createdAt. In short: whenever we only need a plain date, we use LocalDate; whenever we also need to know exactly when something happened, we use Long.
+
+## What is a TypeConverter, and why is one enough for the whole database?
+A TypeConverter is what we use when Room doesn't natively recognize a data type — it defines how to convert that type into something Room *can* store, and back again. A single TypeConverter class is enough for the entire database because converters are tied to the data type being converted (LocalDate ↔ Long), not to any specific Entity. Once it's registered on the @Database class via @TypeConverters, it applies globally — every field of that type, across every table, uses the same conversion logic. This keeps the conversion rule defined in exactly one place, following the DRY principle.
